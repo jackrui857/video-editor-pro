@@ -1,5 +1,21 @@
 import type { Express } from "express";
+import { Readable } from "node:stream";
 import { ENV } from "./env";
+
+const MEDIA_RESPONSE_HEADERS = ["content-type", "content-length", "content-range", "accept-ranges", "etag", "last-modified"] as const;
+
+export function createStorageRequestHeaders(range?: string): Record<string, string> {
+  return range ? { Range: range } : {};
+}
+
+export function getMediaResponseHeaders(headers: Headers) {
+  return Object.fromEntries(
+    MEDIA_RESPONSE_HEADERS.flatMap(name => {
+      const value = headers.get(name);
+      return value ? [[name, value]] : [];
+    }),
+  );
+}
 
 export function registerStorageProxy(app: Express) {
   app.get("/manus-storage/*", async (req, res) => {
@@ -38,8 +54,24 @@ export function registerStorageProxy(app: Express) {
         return;
       }
 
-      res.set("Cache-Control", "no-store");
-      res.redirect(307, url);
+      const upstream = await fetch(url, {
+        headers: createStorageRequestHeaders(req.header("range") || undefined),
+      });
+      if (!upstream.ok) {
+        const body = await upstream.text().catch(() => "");
+        console.error(`[StorageProxy] media read error: ${upstream.status} ${body.slice(0, 240)}`);
+        res.status(502).send("Storage media read error");
+        return;
+      }
+
+      for (const [name, value] of Object.entries(getMediaResponseHeaders(upstream.headers))) res.set(name, value);
+      res.set("Cache-Control", "private, max-age=300");
+      res.status(upstream.status);
+      if (!upstream.body) {
+        res.end();
+        return;
+      }
+      Readable.fromWeb(upstream.body as import("stream/web").ReadableStream).pipe(res);
     } catch (err) {
       console.error("[StorageProxy] failed:", err);
       res.status(502).send("Storage proxy error");

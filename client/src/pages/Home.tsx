@@ -3,6 +3,7 @@ import { startLogin } from "@/const";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { clampFontSize, clampPercent, createEmptyEditorState, DEFAULT_COLOR_ADJUSTMENTS, type AspectRatio, type ColorAdjustments, type EditorState, type OutputQuality, type SubtitleCue, type TextLayer, type TimelineClip, type TransitionKind } from "@shared/editorTypes";
+import { getPreviewSource, getVideoPlaybackErrorMessage } from "@shared/previewMedia";
 import { trpc } from "@/lib/trpc";
 import { Check, ChevronDown, Clapperboard, Clock3, Contrast, Crop, Download, FileText, Film, FolderOpen, Layers3, Loader2, Maximize2, Mic2, Minus, Moon, MousePointer2, Palette, Pause, Play, Plus, Scissors, SlidersHorizontal, Sparkles, Split, Subtitles, SunMedium, Trash2, Type, Upload, WandSparkles, ZoomIn, ZoomOut } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -107,6 +108,7 @@ export default function Home() {
   const [saving, setSaving] = useState(false);
   const [draggingClip, setDraggingClip] = useState<string | null>(null);
   const [renderUrl, setRenderUrl] = useState<string | null>(null);
+  const [localPreviewSources, setLocalPreviewSources] = useState<Record<string, string>>({});
 
   const timelineDurationMs = useMemo(() => Math.max(15_000, ...editorState.clips.map(clip => clip.endMs + 2_000)), [editorState.clips]);
   const pixelsPerSecond = 54 * timelineZoom;
@@ -114,7 +116,7 @@ export default function Home() {
   const selectedClip = editorState.clips.find(clip => clip.id === selectedClipId) ?? null;
   const selectedText = editorState.textLayers.find(layer => layer.id === selectedTextId) ?? null;
   const activeClip = useMemo(() => editorState.clips.find(clip => currentMs >= clip.startMs && currentMs <= clip.endMs) ?? editorState.clips[0] ?? null, [currentMs, editorState.clips]);
-  const activeSource = activeClip?.sourceUrl ?? "";
+  const activeSource = activeClip ? getPreviewSource(activeClip.sourceUrl, localPreviewSources[activeClip.id]) : "";
   const displayText = editorState.textLayers.filter(layer => currentMs >= layer.startMs && currentMs <= layer.endMs);
   const visibleSubtitle = editorState.subtitles.find(cue => currentMs >= cue.startMs && currentMs <= cue.endMs);
   const videoFilter = `brightness(${Math.max(0, 1 + (editorState.color.brightness + editorState.color.exposure) / 100)}) contrast(${Math.max(0, 1 + editorState.color.contrast / 100)}) saturate(${Math.max(0, 1 + editorState.color.saturation / 100)})`;
@@ -177,11 +179,13 @@ export default function Home() {
       const localUrl = URL.createObjectURL(file);
       const uploaded = await uploadAsset(file, "video");
       const startMs = editorState.clips.length ? Math.max(...editorState.clips.map(clip => clip.endMs)) : 0;
+      const clipId = makeId("clip");
       const clip: TimelineClip = {
-        id: makeId("clip"), assetId: uploaded.assetId, label: file.name, sourceUrl: uploaded.publicUrl || localUrl,
+        id: clipId, assetId: uploaded.assetId, label: file.name, sourceUrl: uploaded.publicUrl || localUrl,
         startMs, endMs: startMs + duration, trimStartMs: 0, trimEndMs: duration, transition: editorState.clips.length ? "fade" : "none",
       };
       setEditorState(state => ({ ...state, clips: [...state.clips, clip] }));
+      setLocalPreviewSources(sources => ({ ...sources, [clipId]: localUrl }));
       setSelectedClipId(clip.id);
       setCurrentMs(startMs);
       toast.success("影片已上傳至雲端並加入主影片軌。 ");
@@ -257,6 +261,10 @@ export default function Home() {
     if (playing) { video.pause(); setPlaying(false); return; }
     if (currentMs < activeClip.startMs || currentMs > activeClip.endMs) seekTo(activeClip.startMs);
     try { await video.play(); setPlaying(true); } catch { toast.error("瀏覽器無法播放這支影片。 "); }
+  };
+
+  const handleVideoPlaybackError = () => {
+    toast.error(getVideoPlaybackErrorMessage(videoRef.current?.error?.code));
   };
 
   const handleVideoTime = () => {
@@ -388,7 +396,7 @@ export default function Home() {
           <section className="relative flex min-h-[420px] min-w-0 flex-col items-center justify-center overflow-hidden bg-[radial-gradient(circle_at_50%_35%,#202039_0%,#12121b_42%,#0d0d12_72%)] p-4 xl:col-start-1 xl:row-start-1">
             <div className="absolute left-5 top-4 flex items-center gap-2 text-[11px] text-zinc-400"><span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2 py-0.5 text-emerald-300">即時預覽</span><span>{aspectRatio}・{outputQuality}</span></div>
             <div className="relative max-h-[calc(100%-4rem)] max-w-full overflow-hidden rounded-2xl bg-[#050507] shadow-[0_28px_70px_rgba(0,0,0,0.55)]" style={{ aspectRatio: aspectRatio === "16:9" ? "16 / 9" : "9 / 16", height: aspectRatio === "16:9" ? "min(52vw, 470px)" : "min(52vh, 470px)" }}>
-              {activeSource ? <video ref={videoRef} key={activeSource} src={activeSource} onTimeUpdate={handleVideoTime} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onLoadedMetadata={() => { if (videoRef.current) videoRef.current.currentTime = Math.max(0, currentMs - (activeClip?.startMs ?? 0) + (activeClip?.trimStartMs ?? 0)) / 1000; }} className="h-full w-full object-contain" style={{ filter: videoFilter }} playsInline crossOrigin="anonymous" /> : <div className="flex h-full w-full flex-col items-center justify-center gap-4 bg-[linear-gradient(135deg,#1a1a2c_0%,#0c0c10_60%)] text-center"><div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-500/15"><Film className="h-7 w-7 text-indigo-300" /><div className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-violet-400" /></div><div><p className="text-sm font-medium text-white">從媒體庫開始建立影片</p><p className="mt-1 text-xs text-zinc-500">上傳影片後，剪輯結果會在此即時呈現</p></div><Button onClick={() => videoInputRef.current?.click()} className="bg-indigo-500 hover:bg-indigo-400"><Upload className="mr-1.5 h-4 w-4" />匯入影片</Button></div>}
+              {activeSource ? <video ref={videoRef} key={activeSource} src={activeSource} preload="metadata" onError={handleVideoPlaybackError} onTimeUpdate={handleVideoTime} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onLoadedMetadata={() => { if (videoRef.current) videoRef.current.currentTime = Math.max(0, currentMs - (activeClip?.startMs ?? 0) + (activeClip?.trimStartMs ?? 0)) / 1000; }} className="h-full w-full object-contain" style={{ filter: videoFilter }} playsInline /> : <div className="flex h-full w-full flex-col items-center justify-center gap-4 bg-[linear-gradient(135deg,#1a1a2c_0%,#0c0c10_60%)] text-center"><div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-500/15"><Film className="h-7 w-7 text-indigo-300" /><div className="absolute -right-1 -top-1 h-3 w-3 rounded-full bg-violet-400" /></div><div><p className="text-sm font-medium text-white">從媒體庫開始建立影片</p><p className="mt-1 text-xs text-zinc-500">上傳影片後，剪輯結果會在此即時呈現</p></div><Button onClick={() => videoInputRef.current?.click()} className="bg-indigo-500 hover:bg-indigo-400"><Upload className="mr-1.5 h-4 w-4" />匯入影片</Button></div>}
               <div className="pointer-events-none absolute inset-0 overflow-hidden">
                 {displayText.map(layer => <div key={layer.id} className={`absolute -translate-x-1/2 -translate-y-1/2 whitespace-pre-wrap text-center font-bold leading-tight drop-shadow-[0_2px_8px_rgba(0,0,0,.9)] ${selectedTextId === layer.id ? "outline outline-1 outline-indigo-400/80 outline-offset-4" : ""}`} style={{ left: `${layer.x}%`, top: `${layer.y}%`, color: layer.color, fontSize: `${layer.fontSize}px`, fontFamily: `'${layer.fontFamily}', sans-serif` }}>{layer.content}</div>)}
                 {visibleSubtitle && <div className="absolute bottom-[7%] left-1/2 max-w-[82%] -translate-x-1/2 rounded bg-black/70 px-3 py-1.5 text-center text-xs font-medium leading-relaxed text-white shadow-lg md:text-sm">{visibleSubtitle.text}</div>}
