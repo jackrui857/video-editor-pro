@@ -8,9 +8,11 @@ import { DEFAULT_SUBTITLE_POSITION, getSubtitlePreviewPosition } from "@shared/s
 import { getSubtitlePreviewStyle, getVisibleSubtitles, updateSubtitleTiming } from "@shared/subtitlePreviewState";
 import { alignSubtitlesToClip } from "@shared/subtitleTimeline";
 import { createTextDragController } from "@shared/textDragController";
+import { getRetryButtonLabel, invokeRetryAction, type RetryableEditorAction } from "@shared/retryAction";
 import { trpc } from "@/lib/trpc";
+import { isRetryableApiError, parseApiJson } from "@/lib/safeApiResponse";
 import { Check, ChevronDown, Clapperboard, Clock3, Contrast, Crop, Download, FileText, Film, FolderOpen, Layers3, Loader2, Maximize2, Mic2, Minus, Moon, MousePointer2, Palette, Pause, Play, Plus, Scissors, SlidersHorizontal, Sparkles, Split, Subtitles, SunMedium, Trash2, Type, Upload, WandSparkles, ZoomIn, ZoomOut } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { toast } from "sonner";
 
 type Tool = "media" | "text" | "captions" | "color" | "export";
@@ -118,6 +120,7 @@ export default function Home() {
   const [draggingSubtitleId, setDraggingSubtitleId] = useState<string | null>(null);
   const [renderUrl, setRenderUrl] = useState<string | null>(null);
   const [localPreviewSources, setLocalPreviewSources] = useState<Record<string, string>>({});
+  const [retryableAction, setRetryableAction] = useState<RetryableEditorAction | null>(null);
 
   const timelineDurationMs = useMemo(() => Math.max(15_000, ...editorState.clips.map(clip => clip.endMs + 2_000)), [editorState.clips]);
   const pixelsPerSecond = 54 * timelineZoom;
@@ -129,6 +132,7 @@ export default function Home() {
   const activeSource = activeClip ? getPreviewSource(activeClip.sourceUrl, localPreviewSources[activeClip.id]) : "";
   const displayText = editorState.textLayers.filter(layer => currentMs >= layer.startMs && currentMs <= layer.endMs);
   const visibleSubtitles = getVisibleSubtitles(editorState.subtitles, currentMs);
+  const retryButtonLabel = getRetryButtonLabel(retryableAction);
   const videoFilter = `brightness(${Math.max(0, 1 + (editorState.color.brightness + editorState.color.exposure) / 100)}) contrast(${Math.max(0, 1 + editorState.color.contrast / 100)}) saturate(${Math.max(0, 1 + editorState.color.saturation / 100)})`;
 
   useEffect(() => {
@@ -168,7 +172,7 @@ export default function Home() {
       headers: { "Content-Type": file.type, "X-File-Name": encodeURIComponent(file.name) },
       body: file,
     });
-    const data = await response.json() as { id?: number; publicUrl?: string; error?: string };
+    const data = await parseApiJson<{ id?: number; publicUrl?: string; error?: string }>(response);
     if (!response.ok || !data.publicUrl) throw new Error(data.error || "媒體上傳失敗。");
     return { assetId: data.id, publicUrl: data.publicUrl };
   }, [ensureProject]);
@@ -390,8 +394,10 @@ export default function Home() {
       const timelineSubtitles = alignSubtitlesToClip(result.subtitles, source);
       setEditorState(state => ({ ...state, subtitles: timelineSubtitles }));
       setSelectedSubtitleId(timelineSubtitles[0]?.id ?? null);
+      setRetryableAction(null);
       toast.success(`Whisper 已辨識並加入影片時間軸的 ${timelineSubtitles.length} 段字幕，您可在預覽區拖曳或雙擊編輯。`);
     } catch (error) {
+      setRetryableAction(isRetryableApiError(error) ? "captions" : null);
       if (error instanceof Error && error.message !== "AUTH_REQUIRED") toast.error(error.message || "字幕辨識失敗，請確認影片包含可用語音。 ");
     }
   };
@@ -403,10 +409,19 @@ export default function Home() {
       await saveProjectMutation.mutateAsync({ projectId: id, name: projectName.trim() || "未命名影片專案", aspectRatio, outputQuality, durationMs: timelineDurationMs, state: editorState });
       const result = await renderProject.mutateAsync({ projectId: id });
       setRenderUrl(result.url);
+      setRetryableAction(null);
       toast.success("影片已完成 FFmpeg 雲端渲染，可立即下載。 ");
     } catch (error) {
+      setRetryableAction(isRetryableApiError(error) ? "render" : null);
       if (error instanceof Error && error.message !== "AUTH_REQUIRED") toast.error(error.message || "影片渲染失敗，請縮短時間軸後再試。 ");
     }
+  };
+
+  const retryLastAction = () => {
+    void invokeRetryAction(retryableAction, {
+      captions: recognizeCaptions,
+      render: beginRender,
+    });
   };
 
   const saveProject = async () => {
@@ -476,8 +491,8 @@ export default function Home() {
 
           <section className="min-w-0 overflow-hidden border-t border-white/[0.08] bg-[#0e0e14] xl:col-span-2 xl:row-start-2">
             {selectedClip && activeTool === "media" && <div className="flex items-center gap-2 border-b border-white/[0.07] bg-indigo-500/[0.035] px-3 py-1.5 text-[11px] text-zinc-400"><Crop className="h-3.5 w-3.5 text-indigo-300" /><span>快速裁切</span><Button variant="ghost" size="sm" onClick={() => trimSelectedClip("start", selectedClip.trimStartMs / 1_000 + 0.1)} className="h-7 px-2 text-[11px] text-zinc-300 hover:bg-white/10">起點 +0.1 秒</Button><Button variant="ghost" size="sm" onClick={() => trimSelectedClip("end", selectedClip.trimEndMs / 1_000 - 0.1)} className="h-7 px-2 text-[11px] text-zinc-300 hover:bg-white/10">終點 −0.1 秒</Button></div>}
-            {activeTool === "captions" && <div className="flex items-center justify-between border-b border-violet-400/15 bg-violet-500/[0.045] px-3 py-1.5"><span className="flex items-center gap-2 text-[11px] text-violet-100"><Sparkles className="h-3.5 w-3.5 text-violet-300" />Whisper AI 會從目前素材擷取語音與時間戳</span><Button size="sm" disabled={!editorState.clips.length || transcribeCaptions.isPending} onClick={recognizeCaptions} className="h-7 bg-violet-500 px-2.5 text-[11px] hover:bg-violet-400">{transcribeCaptions.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Mic2 className="mr-1.5 h-3.5 w-3.5" />}{transcribeCaptions.isPending ? "辨識中" : "開始辨識"}</Button></div>}
-            {activeTool === "export" && <div className="flex items-center justify-between border-b border-emerald-400/15 bg-emerald-500/[0.045] px-3 py-1.5"><span className="flex items-center gap-2 text-[11px] text-emerald-100"><Clapperboard className="h-3.5 w-3.5 text-emerald-300" />使用 FFmpeg 依目前時間軸完成雲端輸出</span>{renderUrl ? <a href={renderUrl} className="flex h-7 items-center rounded bg-emerald-400 px-2.5 text-[11px] font-semibold text-emerald-950 hover:bg-emerald-300"><Download className="mr-1.5 h-3.5 w-3.5" />下載 MP4</a> : <Button size="sm" disabled={!editorState.clips.length || renderProject.isPending} onClick={beginRender} className="h-7 bg-emerald-400 px-2.5 text-[11px] text-emerald-950 hover:bg-emerald-300">{renderProject.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Download className="mr-1.5 h-3.5 w-3.5" />}{renderProject.isPending ? "渲染中" : "開始輸出"}</Button>}</div>}
+            {activeTool === "captions" && <div className="flex items-center justify-between border-b border-violet-400/15 bg-violet-500/[0.045] px-3 py-1.5"><span className="flex items-center gap-2 text-[11px] text-violet-100"><Sparkles className="h-3.5 w-3.5 text-violet-300" />Whisper AI 會從目前素材擷取語音與時間戳</span>{retryableAction === "captions" ? <Button size="sm" onClick={retryLastAction} className="h-7 bg-violet-300 px-2.5 text-[11px] text-violet-950 hover:bg-violet-200">{retryButtonLabel}</Button> : <Button size="sm" disabled={!editorState.clips.length || transcribeCaptions.isPending} onClick={recognizeCaptions} className="h-7 bg-violet-500 px-2.5 text-[11px] hover:bg-violet-400">{transcribeCaptions.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Mic2 className="mr-1.5 h-3.5 w-3.5" />}{transcribeCaptions.isPending ? "辨識中" : "開始辨識"}</Button>}</div>}
+            {activeTool === "export" && <div className="flex items-center justify-between border-b border-emerald-400/15 bg-emerald-500/[0.045] px-3 py-1.5"><span className="flex items-center gap-2 text-[11px] text-emerald-100"><Clapperboard className="h-3.5 w-3.5 text-emerald-300" />使用 FFmpeg 依目前時間軸完成雲端輸出</span>{renderUrl ? <a href={renderUrl} className="flex h-7 items-center rounded bg-emerald-400 px-2.5 text-[11px] font-semibold text-emerald-950 hover:bg-emerald-300"><Download className="mr-1.5 h-3.5 w-3.5" />下載 MP4</a> : retryableAction === "render" ? <Button size="sm" onClick={retryLastAction} className="h-7 bg-emerald-300 px-2.5 text-[11px] text-emerald-950 hover:bg-emerald-200">{retryButtonLabel}</Button> : <Button size="sm" disabled={!editorState.clips.length || renderProject.isPending} onClick={beginRender} className="h-7 bg-emerald-400 px-2.5 text-[11px] text-emerald-950 hover:bg-emerald-300">{renderProject.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Download className="mr-1.5 h-3.5 w-3.5" />}{renderProject.isPending ? "渲染中" : "開始輸出"}</Button>}</div>}
             <div className="flex min-h-11 items-center justify-between border-b border-white/[0.07] px-3 md:px-4"><div className="flex items-center gap-1"><Button variant="ghost" size="icon" onClick={() => seekTo(0)} className="h-8 w-8 text-zinc-400 hover:bg-white/10 hover:text-white"><MousePointer2 className="h-4 w-4" /></Button><Button variant="ghost" size="icon" onClick={splitClip} disabled={!selectedClip} className="h-8 text-zinc-300 hover:bg-white/10"><Split className="mr-1.5 h-3.5 w-3.5" />分割</Button><Button variant="ghost" size="icon" onClick={removeSelectedClip} disabled={!selectedClip} className="h-8 w-8 text-zinc-500 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="h-3.5 w-3.5" /></Button><span className="mx-2 h-4 w-px bg-white/10" /><Button variant="ghost" size="icon" onClick={() => setTimelineZoom(value => Math.max(0.6, value - 0.2))} className="h-8 w-8 text-zinc-400 hover:bg-white/10"><ZoomOut className="h-3.5 w-3.5" /></Button><span className="w-8 text-center font-mono text-[10px] text-zinc-500">{Math.round(timelineZoom * 100)}%</span><Button variant="ghost" size="icon" onClick={() => setTimelineZoom(value => Math.min(3, value + 0.2))} className="h-8 w-8 text-zinc-400 hover:bg-white/10"><ZoomIn className="h-3.5 w-3.5" /></Button></div><div className="flex items-center gap-2 text-[10px] text-zinc-500"><Layers3 className="h-3.5 w-3.5" /><span>多軌時間軸</span></div></div>
             <div className="h-[250px] overflow-auto editor-scroll"><div ref={timelineRef} className="relative min-h-[220px]" style={{ width: timelineWidth }} onPointerDown={event => { if (event.currentTarget === event.target) seekTo((event.nativeEvent.offsetX / pixelsPerSecond) * 1000); }}>
               <div className="relative h-8 border-b border-white/[0.08] bg-[#111119]">{Array.from({ length: Math.ceil(timelineDurationMs / 5_000) + 1 }, (_, index) => <div key={index} className="absolute top-0 h-full border-l border-white/[0.1] pl-1 pt-2 font-mono text-[10px] text-zinc-600" style={{ left: `${(index * 5_000 / 1_000) * pixelsPerSecond}px` }}>{formatTime(index * 5_000)}</div>)}</div>
