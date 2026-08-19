@@ -48,8 +48,31 @@ export function describeApiResponseError(
   return `伺服器回應無法處理（HTTP ${status}${statusText ? ` ${statusText}` : ""}），請稍後重試。`;
 }
 
-export function isRetryableApiError(error: unknown): error is ApiResponseError {
-  return error instanceof ApiResponseError && error.retryable;
+export function isRetryableApiError(error: unknown): boolean {
+  const visited = new Set<unknown>();
+  let candidate: unknown = error;
+
+  // tRPC can wrap a rejected fetch in a client error. Inspect its cause chain
+  // and HTTP metadata so a temporary gateway response still exposes retry UI.
+  while (candidate && typeof candidate === "object" && !visited.has(candidate)) {
+    visited.add(candidate);
+    if (candidate instanceof ApiResponseError) return candidate.retryable;
+
+    const value = candidate as {
+      status?: unknown;
+      message?: unknown;
+      cause?: unknown;
+      data?: { httpStatus?: unknown; status?: unknown };
+    };
+    const status = typeof value.status === "number" ? value.status
+      : typeof value.data?.httpStatus === "number" ? value.data.httpStatus
+        : typeof value.data?.status === "number" ? value.data.status : undefined;
+    if (status !== undefined && RETRYABLE_STATUS_CODES.has(status)) return true;
+    if (typeof value.message === "string" && value.message.toLowerCase().includes("service unavailable")) return true;
+    candidate = value.cause;
+  }
+
+  return false;
 }
 
 /** Queries can retry transient gateway failures twice; mutations stay user-triggered to avoid duplicate renders. */

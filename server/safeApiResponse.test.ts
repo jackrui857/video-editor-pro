@@ -4,6 +4,7 @@ import {
   assertJsonApiResponse,
   createSafeApiFetch,
   parseApiJson,
+  isRetryableApiError,
   shouldRetryApiRequest,
 } from "../client/src/lib/safeApiResponse";
 
@@ -62,5 +63,15 @@ describe("safe API response parsing", () => {
     expect(shouldRetryApiRequest(0, error)).toBe(true);
     expect(shouldRetryApiRequest(1, error)).toBe(true);
     expect(shouldRetryApiRequest(2, error)).toBe(false);
+  });
+
+  it("recognizes a retryable error wrapped by the tRPC client", () => {
+    const wrappedError = {
+      message: "tRPC mutation failed",
+      data: { httpStatus: 503 },
+      cause: new ApiResponseError(503, "Service Unavailable", "Service Unavailable"),
+    };
+
+    expect(isRetryableApiError(wrappedError)).toBe(true);
   });
 });

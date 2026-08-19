@@ -3,6 +3,7 @@
 // Downloads return /manus-storage/{key} paths served via 307 redirect.
 
 import { ENV } from "./_core/env";
+import { fetchWithUpstreamRetry } from "./upstreamRetry";
 
 function getForgeConfig() {
   const forgeUrl = ENV.forgeApiUrl;
@@ -40,7 +41,7 @@ export async function storagePut(
   const presignUrl = new URL("v1/storage/presign/put", forgeUrl + "/");
   presignUrl.searchParams.set("path", key);
 
-  const presignResp = await fetch(presignUrl, {
+  const presignResp = await fetchWithUpstreamRetry(presignUrl, {
     headers: { Authorization: `Bearer ${forgeKey}` },
   });
 
@@ -58,7 +59,7 @@ export async function storagePut(
       ? new Blob([data], { type: contentType })
       : new Blob([data as any], { type: contentType });
 
-  const uploadResp = await fetch(s3Url, {
+  const uploadResp = await fetchWithUpstreamRetry(s3Url, {
     method: "PUT",
     headers: { "Content-Type": contentType },
     body: blob,
@@ -83,7 +84,7 @@ export async function storageGetSignedUrl(relKey: string): Promise<string> {
   const getUrl = new URL("v1/storage/presign/get", forgeUrl + "/");
   getUrl.searchParams.set("path", key);
 
-  const resp = await fetch(getUrl, {
+  const resp = await fetchWithUpstreamRetry(getUrl, {
     headers: { Authorization: `Bearer ${forgeKey}` },
   });
 

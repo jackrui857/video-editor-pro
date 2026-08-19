@@ -5,6 +5,7 @@ import path from "path";
 import { addProjectAsset, getProjectAsset, getVideoProject } from "./db";
 import { storageGetSignedUrl, storagePut } from "./storage";
 import { transcribeAudio } from "./_core/voiceTranscription";
+import { fetchWithUpstreamRetry } from "./upstreamRetry";
 import { type EditorState, type SubtitleCue, type TimelineClip } from "../shared/editorTypes";
 import { getSubtitleAssPosition } from "../shared/subtitlePosition";
 import { buildRenderFilename, buildRenderStorageKey } from "../shared/renderOutputName";
@@ -39,14 +40,19 @@ function assetExtension(originalName: string, fallback: string) {
   return extension || fallback;
 }
 
-async function downloadAsset(storageKey: string, localPath: string) {
-  const signedUrl = await storageGetSignedUrl(storageKey);
-  const response = await fetch(signedUrl);
+export async function downloadMediaBytes(signedUrl: string): Promise<Buffer> {
+  const response = await fetchWithUpstreamRetry(signedUrl);
   if (!response.ok) throw new Error("無法讀取雲端媒體檔案。請重新上傳後再試。 ");
   const length = Number(response.headers.get("content-length") || 0);
   if (length > MAX_RENDER_SOURCE_BYTES) throw new Error("來源檔案過大，請將素材縮小後再處理。 ");
   const data = Buffer.from(await response.arrayBuffer());
   if (data.length > MAX_RENDER_SOURCE_BYTES) throw new Error("來源檔案過大，請將素材縮小後再處理。 ");
+  return data;
+}
+
+async function downloadAsset(storageKey: string, localPath: string) {
+  const signedUrl = await storageGetSignedUrl(storageKey);
+  const data = await downloadMediaBytes(signedUrl);
   await writeFile(localPath, data);
   return data.length;
 }

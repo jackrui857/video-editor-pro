@@ -26,6 +26,7 @@
  * ```
  */
 import { ENV } from "./env";
+import { fetchWithUpstreamRetry, isTransientUpstreamStatus } from "../upstreamRetry";
 
 export type TranscribeOptions = {
   audioUrl: string; // URL to the audio file (e.g., S3 URL)
@@ -94,11 +95,13 @@ export async function transcribeAudio(
     let audioBuffer: Buffer;
     let mimeType: string;
     try {
-      const response = await fetch(options.audioUrl);
+      const response = await fetchWithUpstreamRetry(options.audioUrl);
       if (!response.ok) {
         return {
-          error: "Failed to download audio file",
-          code: "INVALID_FORMAT",
+          error: isTransientUpstreamStatus(response.status)
+            ? "音訊服務暫時不可用，已自動重試，請稍候再按一次重試辨識。"
+            : "無法讀取音訊檔案，請確認影片素材仍可播放後再試。",
+          code: isTransientUpstreamStatus(response.status) ? "SERVICE_ERROR" : "INVALID_FORMAT",
           details: `HTTP ${response.status}: ${response.statusText}`
         };
       }
@@ -152,7 +155,7 @@ export async function transcribeAudio(
       baseUrl
     ).toString();
 
-    const response = await fetch(fullUrl, {
+    const response = await fetchWithUpstreamRetry(fullUrl, {
       method: "POST",
       headers: {
         authorization: `Bearer ${ENV.forgeApiKey}`,
@@ -164,8 +167,10 @@ export async function transcribeAudio(
     if (!response.ok) {
       const errorText = await response.text().catch(() => "");
       return {
-        error: "Transcription service request failed",
-        code: "TRANSCRIPTION_FAILED",
+        error: isTransientUpstreamStatus(response.status)
+          ? "字幕辨識服務暫時不可用，已自動重試，請稍候再按一次重試辨識。"
+          : "字幕辨識服務請求失敗。",
+        code: isTransientUpstreamStatus(response.status) ? "SERVICE_ERROR" : "TRANSCRIPTION_FAILED",
         details: `${response.status} ${response.statusText}${errorText ? `: ${errorText}` : ""}`
       };
     }
