@@ -5,7 +5,8 @@ import path from "path";
 import { addProjectAsset, getProjectAsset, getVideoProject } from "./db";
 import { storageGetSignedUrl, storagePut } from "./storage";
 import { transcribeAudio } from "./_core/voiceTranscription";
-import type { EditorState, SubtitleCue, TimelineClip } from "../shared/editorTypes";
+import { type EditorState, type SubtitleCue, type TimelineClip } from "../shared/editorTypes";
+import { getSubtitleAssPosition } from "../shared/subtitlePosition";
 import { buildRenderFilename, buildRenderStorageKey } from "../shared/renderOutputName";
 
 const MAX_RENDER_DURATION_MS = 60_000;
@@ -104,7 +105,7 @@ function assColor(hex: string) {
   return `&H00${valid.slice(4, 6)}${valid.slice(2, 4)}${valid.slice(0, 2)}`;
 }
 
-function buildAss(state: EditorState, width: number, height: number, fontFamilies: Record<string, string>) {
+export function buildAss(state: EditorState, width: number, height: number, fontFamilies: Record<string, string>) {
   const header = `[Script Info]\nScriptType: v4.00+\nPlayResX: ${width}\nPlayResY: ${height}\nScaledBorderAndShadow: yes\n\n[V4+ Styles]\nFormat: Name,Fontname,Fontsize,PrimaryColour,SecondaryColour,OutlineColour,BackColour,Bold,Italic,Underline,StrikeOut,ScaleX,ScaleY,Spacing,Angle,BorderStyle,Outline,Shadow,Alignment,MarginL,MarginR,MarginV,Encoding\nStyle: Default,Noto Sans CJK TC,28,&H00FFFFFF,&H000000FF,&HAA000000,&H66000000,0,0,0,0,100,100,0,0,1,2,1,2,24,24,38,1\nStyle: Caption,Noto Sans CJK TC,34,&H00FFFFFF,&H000000FF,&HAA000000,&H66000000,1,0,0,0,100,100,0,0,1,2.4,1,2,32,32,78,1\n\n[Events]\nFormat: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\n`;
   const textLines = state.textLayers.filter(layer => layer.content.trim() && layer.endMs > layer.startMs).map(layer => {
     const x = Math.round((layer.x / 100) * width);
@@ -113,7 +114,7 @@ function buildAss(state: EditorState, width: number, height: number, fontFamilie
     const family = fontFamilies[layer.fontFamily] || layer.fontFamily || "Noto Sans CJK TC";
     return `Dialogue: 1,${assTime(layer.startMs)},${assTime(layer.endMs)},Default,,0,0,0,,{\\an5\\pos(${x},${y})\\fs${size}\\fn${family}\\c${assColor(layer.color)}}${assText(layer.content)}`;
   });
-  const subtitleLines = state.subtitles.filter(cue => cue.text.trim() && cue.endMs > cue.startMs).map(cue => `Dialogue: 2,${assTime(cue.startMs)},${assTime(cue.endMs)},Caption,,0,0,0,,${assText(cue.text)}`);
+  const subtitleLines = state.subtitles.filter(cue => cue.text.trim() && cue.endMs > cue.startMs).map(cue => `Dialogue: 2,${assTime(cue.startMs)},${assTime(cue.endMs)},Caption,,0,0,0,,{${getSubtitleAssPosition(cue, width, height)}}${assText(cue.text)}`);
   return header + [...textLines, ...subtitleLines].join("\n") + "\n";
 }
 

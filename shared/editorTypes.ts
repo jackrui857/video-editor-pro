@@ -41,6 +41,9 @@ export type SubtitleCue = {
   startMs: number;
   endMs: number;
   text: string;
+  /** 以預覽畫面百分比保存，舊專案未設定時使用預設底部置中位置。 */
+  x?: number;
+  y?: number;
 };
 
 export type EditorState = {
