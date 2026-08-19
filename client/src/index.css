@@ -119,6 +119,7 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: "Noto Sans TC", sans-serif;
   }
   button:not(:disabled),
   [role="button"]:not([aria-disabled="true"]),
@@ -173,5 +174,28 @@
       padding-right: 2rem;
       max-width: 1280px; /* Standard content width */
     }
+  }
+}
+
+@layer utilities {
+  .editor-range {
+    accent-color: #818cf8;
+    height: 4px;
+    cursor: pointer;
+  }
+
+  .editor-scroll::-webkit-scrollbar {
+    height: 10px;
+    width: 10px;
+  }
+
+  .editor-scroll::-webkit-scrollbar-thumb {
+    background: rgba(161, 161, 170, 0.25);
+    border: 3px solid #0e0e14;
+    border-radius: 999px;
+  }
+
+  .editor-scroll::-webkit-scrollbar-track {
+    background: #0e0e14;
   }
 }

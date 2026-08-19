@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users } from "../drizzle/schema";
+import { InsertUser, InsertVideoProject, projectAssets, users, videoProjects } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -89,4 +89,43 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
-// TODO: add feature queries here as your schema grows.
+export async function listVideoProjects(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return db.select().from(videoProjects).where(eq(videoProjects.userId, userId)).orderBy(desc(videoProjects.updatedAt));
+}
+
+export async function getVideoProject(userId: number, projectId: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const records = await db.select().from(videoProjects).where(and(eq(videoProjects.id, projectId), eq(videoProjects.userId, userId))).limit(1);
+  return records[0];
+}
+
+export async function createVideoProject(project: InsertVideoProject) {
+  const db = await getDb();
+  if (!db) throw new Error("資料庫目前無法使用，無法建立影片專案。");
+  const result = await db.insert(videoProjects).values(project);
+  return Number(result[0].insertId);
+}
+
+export async function updateVideoProject(userId: number, projectId: number, payload: Pick<InsertVideoProject, "name" | "aspectRatio" | "outputQuality" | "durationMs" | "editorState">) {
+  const db = await getDb();
+  if (!db) throw new Error("資料庫目前無法使用，無法儲存影片專案。");
+  await db.update(videoProjects).set(payload).where(and(eq(videoProjects.id, projectId), eq(videoProjects.userId, userId)));
+  return getVideoProject(userId, projectId);
+}
+
+export async function addProjectAsset(asset: typeof projectAssets.$inferInsert) {
+  const db = await getDb();
+  if (!db) throw new Error("資料庫目前無法使用，無法記錄媒體檔案。");
+  const result = await db.insert(projectAssets).values(asset);
+  return Number(result[0].insertId);
+}
+
+export async function getProjectAsset(userId: number, assetId: number) {
+  const db = await getDb();
+  if (!db) return undefined;
+  const records = await db.select().from(projectAssets).where(and(eq(projectAssets.id, assetId), eq(projectAssets.userId, userId))).limit(1);
+  return records[0];
+}

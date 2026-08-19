@@ -25,4 +25,31 @@ export const users = mysqlTable("users", {
 export type User = typeof users.$inferSelect;
 export type InsertUser = typeof users.$inferInsert;
 
-// TODO: Add your tables here
+export const videoProjects = mysqlTable("video_projects", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  name: varchar("name", { length: 160 }).notNull(),
+  aspectRatio: mysqlEnum("aspectRatio", ["16:9", "9:16"]).default("16:9").notNull(),
+  outputQuality: mysqlEnum("outputQuality", ["1080p", "2160p"]).default("1080p").notNull(),
+  durationMs: int("durationMs").default(0).notNull(),
+  editorState: text("editorState").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export const projectAssets = mysqlTable("project_assets", {
+  id: int("id").autoincrement().primaryKey(),
+  projectId: int("projectId").notNull(),
+  userId: int("userId").notNull(),
+  kind: mysqlEnum("kind", ["video", "audio", "font", "render"]).notNull(),
+  originalName: varchar("originalName", { length: 255 }).notNull(),
+  storageKey: varchar("storageKey", { length: 768 }).notNull(),
+  publicUrl: varchar("publicUrl", { length: 1024 }).notNull(),
+  mimeType: varchar("mimeType", { length: 128 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type VideoProject = typeof videoProjects.$inferSelect;
+export type InsertVideoProject = typeof videoProjects.$inferInsert;
+export type ProjectAsset = typeof projectAssets.$inferSelect;
+export type InsertProjectAsset = typeof projectAssets.$inferInsert;
