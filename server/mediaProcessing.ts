@@ -6,6 +6,7 @@ import { addProjectAsset, getProjectAsset, getVideoProject } from "./db";
 import { storageGetSignedUrl, storagePut } from "./storage";
 import { transcribeAudio } from "./_core/voiceTranscription";
 import type { EditorState, SubtitleCue, TimelineClip } from "../shared/editorTypes";
+import { buildRenderFilename, buildRenderStorageKey } from "../shared/renderOutputName";
 
 const MAX_RENDER_DURATION_MS = 60_000;
 const MAX_4K_DURATION_MS = 30_000;
@@ -225,8 +226,8 @@ export async function renderVideoProject(userId: number, projectId: number) {
     const output = await readFile(finalPath);
     const maxOutput = 220 * 1024 * 1024;
     if (output.length > maxOutput) throw new Error("輸出檔案超過可下載大小限制。請選擇 1080p 或縮短影片。 ");
-    const filename = `${project.name.replace(/[^\w\-\u4e00-\u9fff]/g, "_").slice(0, 72) || "clipflow"}-${project.aspectRatio.replace(":", "x")}-${project.outputQuality}.mp4`;
-    const stored = await storagePut(`video-editor/${userId}/${projectId}/render-${filename}`, output, "video/mp4");
+    const filename = buildRenderFilename(project.name, project.aspectRatio, project.outputQuality);
+    const stored = await storagePut(buildRenderStorageKey(userId, projectId, filename), output, "video/mp4");
     const assetId = await addProjectAsset({ projectId, userId, kind: "render", originalName: filename, storageKey: stored.key, publicUrl: stored.url, mimeType: "video/mp4" });
     return { assetId, url: stored.url, filename, bytes: output.length };
   } finally {
