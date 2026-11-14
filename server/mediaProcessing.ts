@@ -14,6 +14,7 @@ const MAX_RENDER_DURATION_MS = 60_000;
 const MAX_4K_DURATION_MS = 30_000;
 const MAX_RENDER_SOURCE_BYTES = 180 * 1024 * 1024;
 const MAX_TRANSCRIPTION_AUDIO_BYTES = 16 * 1024 * 1024;
+export const FFMPEG_RENDER_PRESET = "ultrafast";
 
 type RenderSettings = { aspectRatio: "16:9" | "9:16"; outputQuality: "1080p" | "2160p" };
 
@@ -156,7 +157,7 @@ async function prepareClip(inputPath: string, outputPath: string, clip: Timeline
   const audioPresent = await hasAudioStream(inputPath);
   const args = ["-y", "-ss", String(Math.max(0, clip.trimStartMs / 1_000)), "-t", String(duration), "-i", inputPath];
   if (!audioPresent) args.push("-f", "lavfi", "-t", String(duration), "-i", "anullsrc=channel_layout=stereo:sample_rate=48000");
-  args.push("-map", "0:v:0", "-map", audioPresent ? "0:a:0" : "1:a:0", "-vf", buildVisualFilter(state, width, height), "-r", "30", "-c:v", "libx264", "-preset", "veryfast", "-crf", settings.outputQuality === "2160p" ? "20" : "22", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ar", "48000", "-b:a", "160k", "-movflags", "+faststart", outputPath);
+  args.push("-map", "0:v:0", "-map", audioPresent ? "0:a:0" : "1:a:0", "-vf", buildVisualFilter(state, width, height), "-r", "30", "-c:v", "libx264", "-preset", FFMPEG_RENDER_PRESET, "-crf", settings.outputQuality === "2160p" ? "20" : "22", "-pix_fmt", "yuv420p", "-c:a", "aac", "-ar", "48000", "-b:a", "160k", "-movflags", "+faststart", outputPath);
   await runBinary("ffmpeg", args);
   return duration;
 }
@@ -187,7 +188,7 @@ async function joinClips(paths: string[], clips: TimelineClip[], durations: numb
     currentDuration += durations[index] - duration;
   }
   const args = paths.flatMap(item => ["-i", item]);
-  args.push("-filter_complex", filter.slice(0, -1), "-map", `[${lastVideo}]`, "-map", `[${lastAudio}]`, "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-c:a", "aac", "-movflags", "+faststart", outputPath);
+  args.push("-filter_complex", filter.slice(0, -1), "-map", `[${lastVideo}]`, "-map", `[${lastAudio}]`, "-c:v", "libx264", "-preset", FFMPEG_RENDER_PRESET, "-crf", "21", "-c:a", "aac", "-movflags", "+faststart", outputPath);
   await runBinary("ffmpeg", args);
 }
 
@@ -226,7 +227,7 @@ export async function renderVideoProject(userId: number, projectId: number) {
       const assPath = path.join(workspace, "overlay.ass");
       await writeFile(assPath, ass);
       const escape = (value: string) => value.replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/'/g, "\\'");
-      await runBinary("ffmpeg", ["-y", "-i", joinedPath, "-vf", `subtitles='${escape(assPath)}':fontsdir='${escape(fontSetup.fontsDirectory)}'`, "-c:v", "libx264", "-preset", "veryfast", "-crf", settings.outputQuality === "2160p" ? "20" : "22", "-c:a", "copy", "-movflags", "+faststart", finalPath]);
+      await runBinary("ffmpeg", ["-y", "-i", joinedPath, "-vf", `subtitles='${escape(assPath)}':fontsdir='${escape(fontSetup.fontsDirectory)}'`, "-c:v", "libx264", "-preset", FFMPEG_RENDER_PRESET, "-crf", settings.outputQuality === "2160p" ? "20" : "22", "-c:a", "copy", "-movflags", "+faststart", finalPath]);
     } else {
       await runBinary("ffmpeg", ["-y", "-i", joinedPath, "-c", "copy", finalPath]);
     }
